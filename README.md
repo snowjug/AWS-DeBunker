@@ -1,5 +1,5 @@
 https://github.com/snowjug/DeBunker Project
-
+snowjug.tech
 
 End-to-End Manual CI/CD Guide (Jenkins + SonarQube + Docker on AWS EC2)
 This README-style guide walks through every click,, and setting required to spin up three Amazon Linux 2 t2.medium instances—one each for Jenkins, SonarQube, and Docker—and then glue them together manually through their browser interfaces. It covers instance provisioning, plugin installation (SonarQube Scanner, SSH2 Easy), GitHub webhooks, token generation, job creation, and all the tricky UI fields for project properties so you can reproduce the workflow for the DeBunker repository.
