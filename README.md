@@ -257,3 +257,160 @@ SonarQube evaluates every push through the configured server credentials.
 Docker images build and deploy on a dedicated host through SSH2 Easy secure groups.
 
 Follow each section exactly, and your README will guide any teammate—without ever mentioning a declarative Jenkinsfile—from blank AWS account to repeatable three-tier pipeline in under an hour.
+
+Continuous Integration Workflow: GitHub → Jenkins → SonarQube → Docker
+Below is a step-by-step guide to achieve a fully integrated CI pipeline such that any code change you make your EC2 development instance is:
+
+Committed & pushed to GitHub
+
+Automatically fetched by Jenkins (autobuilder job) via GitHub webhooks
+
+Analyzed by SonarQube for code quality
+
+Built into a Docker image and deployed to your Docker EC2
+
+1. Prerequisites & Assumptions
+You have three EC2 t2.medium instances:
+
+dev-instance where you write code
+
+jenkins-server (Jenkins + GitHub webhook listener)
+
+sonarqube-server (SonarQube on port 9000)
+
+docker-server (Docker daemon on port 80/8081)
+
+Each instance uses Amazon Linux 2, has Java 17 (Corretto) where needed, Docker installed on the Docker host, and Jenkins installed on jenkins-server.
+
+You have a GitHub repo (ssh or https) named DeBunker.
+
+You have SSH keys set up among instances and GitHub deploy key configured.
+
+Security groups allow:
+
+Jenkins: inbound 8080, SSH 22
+
+SonarQube: inbound 9000 from Jenkins
+
+Docker: inbound 80/8081 and SSH 22 from Jenkins/private network
+
+2. Developer Workflow on dev-instance
+Edit code under your project folder:
+
+bash
+cd ~/DeBunker
+# make changes to files (index.html, script.js, Dockerfile, etc.)
+Commit & push to GitHub:
+
+bash
+git add .
+git commit -m "Your feature/bugfix description"
+git push origin main
+On push, GitHub triggers the webhook to Jenkins.
+
+3. GitHub Webhook Configuration
+In your GitHub repo → Settings → Webhooks → Add webhook
+
+Payload URL: http://<JENKINS_IP>:8080/github-webhook/
+
+Content type: application/json
+
+Secret: (optional—if Jenkins is CSRF-protected, configure accordingly)
+
+Events: select Just the push event
+
+Save.
+
+4. Jenkins autobuilder Job Setup
+Create new Freestyle job named autobuilder
+
+Source Code Management:
+
+Select Git
+
+Repository URL: git@github.com:snowjug/DeBunker.git
+
+Credentials: your GitHub SSH key credential
+
+Branch Specifier: */main
+
+Build Triggers:
+
+Check GitHub hook trigger for GITScm polling
+
+Build Environment:
+
+Check Prepare SonarQube Scanner → choose your SonarQube server entry
+
+Build Steps:
+
+Execute SonarQube Scanner:
+
+text
+sonar.projectKey=debunker
+sonar.projectName=DeBunker
+sonar.sources=.
+Execute Shell (or SSH2 Easy Remote Script to docker-server):
+
+bash
+#!/bin/bash
+# Ensure latest code on docker host
+ssh ec2-user@<DOCKER_IP> '
+  cd ~/DeBunker || git clone https://github.com/snowjug/DeBunker.git ~/DeBunker
+  cd ~/DeBunker && git pull origin main
+  # Build Docker image
+  docker build -t debunker:latest .
+  # Redeploy
+  docker rm -f debunker || true
+  docker run -d --name debunker -p 8081:80 debunker:latest
+'
+Post-Build Actions (optional):
+
+Email or Slack notification on failure/passage.
+
+5. SonarQube Server Configuration
+In Jenkins → Manage Jenkins → Configure System → SonarQube Servers
+
+Name: sonar-server
+
+Server URL: http://<SONARQUBE_IP>:9000
+
+Credentials: your SonarQube token (Secret Text)
+
+In GitHub repo root, ensure sonar-project.properties exists:
+
+text
+sonar.projectKey=debunker
+sonar.projectName=DeBunker
+sonar.sources=.
+In SonarQube UI → My Account → Security → Generate Token → save into Jenkins credentials.
+
+6. Verification
+On code change: edit on dev-instance → git push
+
+Jenkins receives webhook, starts autobuilder →
+
+Clones code
+
+Runs SonarQube analysis → quality gate results
+
+SSHes to Docker host → builds & deploys container
+
+Check:
+
+Jenkins console logs show ➞ “ANALYSIS SUCCESSFUL” and Docker run success
+
+SonarQube dashboard: http://<SONARQUBE_IP>:9000/dashboard?id=debunker
+
+Application URL: http://<DOCKER_IP>:8081
+
+7. Important Points to Remember
+Webhook & Credentials: GitHub webhook must point correctly and Jenkins must have SSH and SonarQube tokens configured.
+
+Directory Paths: All Docker commands must run in the directory containing your Dockerfile.
+
+Error Handling: Always use docker rm -f container || true before docker run to avoid “no such container” errors.
+
+Security: Restrict security group rules to only required ports and source IPs.
+
+Quality Gates: Configure SonarQube quality profiles and gates to enforce code standards automatically.
